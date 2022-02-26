@@ -1,0 +1,235 @@
+
+psp-open-source project
+=======================
+This is the README file for the psp-open-source project.  The PSP Security
+Protocol (PSP) is a security protocol created by Google for encryption
+in transit.  PSP uses several of the concepts from IPsec ESP to provide
+an  encryption encapsulation layer on-top of IP that is streamlined and
+custom-built to address the requirements of large-scale data centers. PSP
+is described in the "PSP Architecture Specification", which can be found
+in the /doc subdirectory.
+
+The project also contains a reference software implementation written in
+the 'C' language and a suite of packet-level test cases.
+
+The project contains the following subdirectories:
+
+	/src - source code for the reference software implementation
+
+	/pcap - pcap files used for testing
+
+	/cfg - configuration files used for testing
+
+	/test - bash scripts that implement the suite of test cases
+
+	/doc - documentation including the "PSP Architecture Specification"
+	       in .pdf format
+
+	/wireshark - wireshark plugin for PSP
+
+A more detailed description of the subdirectories is provided below.
+
+/src
+====
+Contains 3 programs and a Makefile.  All the executables are built by the
+'make' command.  The 3 programs are:
+
+	create_pcap
+	-----------
+	Creates a cleartext pcap file that can be used for testing.
+
+	The created packets are of the form Eth-IP-UDP-Payload with
+	a fixed size of 1434 octets (unless the -e option is specified).
+
+	All of the created packets are for the same flow (i.e., they all have
+	the same MAC addresses, IP addresses, and UDP port numbers).
+
+	Command Line Args:
+		[-n N] [-f file_name] [-i ver] [-e]
+
+		N is the number of packets to create, defaults to 1
+
+		file_name is the name of the pcap output file,
+		defaults to "cleartext.pcap"
+
+		ver is 4 or 6, 4 indicates create ipv4 packets,
+		6 indicates create ipv6 packets, default is 4
+
+		the -e option indicates that empty packets are to be
+		created, where empty means the size of the l4 payload is 0
+
+	psp_encrypt
+	-----------
+	Program to perform PSP encryption.
+
+	Reads plaintext packets from a pcap input file.
+
+	Performs the following for each packet:
+		- Adds appropriate PSP encapsulation
+		- Computes ICV
+		- Encrypts data
+
+	Then writes each PSP-encrypted packet to a pcap output
+
+	Command Line Args:
+
+	[-c psp_cfg_file_name] [-i in_file] [-o out_file] [-v] [-e]
+
+	-v enables verbose mode
+
+	-e forces a single bit error in each output packet,
+	   which will cause authentication to fail
+
+	Defaults:
+		psp_cfg_file: "psp_encrypt.cfg"
+		in_file:      "cleartext.pcap"
+		out_file:     "psp_encrypt.pcap"
+
+	The format of the PSP encryption configuration file is:
+
+	series of 32 hex bytes (e.g., 34 44 8a ...):            Master Key 0
+	series of 32 hex bytes (e.g., 56 39 52 ...):            Master Key 1
+	32b hex value (e.g., 9A345678), msb selects master key: SPI
+	encap string (either "transport" or "tunnel"):          PSP Encap Mode
+	crypro algorithm string
+	(either "aes-gcm-128" or "aes-gcm-256"):                Crypto Algorithm
+	non-negative integer with units of 4 bytes (e.g., 1):   Transport Mode
+								Crypt Offset
+	non-negative integer with units of 4 bytes (e.g., 6):   IPv4 Tunnel Mode
+								Crypt Offset
+	non-negative integer with units of 4 bytes (e.g., 11):  IPv6 Tunnel Mode
+								Crypt Offset
+	virtual cookie string (either "vc" or "no-vc")          Include VC in
+								PSP Header
+
+	The program uses OpenSSL crypto libraries.
+
+	psp_decrypt
+	-----------
+	Program to perform PSP decryption.
+
+	Reads PSP-encrypted packets from a pcap input file.
+
+	Performs the following for each packet:
+		- Removes the PSP encapsulation (supports transport and tunnel encaps)
+		- Checks that ICV is correct
+		- Decrypts data
+
+	Then writes each cleartext packet to a pcap output
+
+	Command Line Args:
+
+	[-c psp_cfg_file_name] [-i input_file_name] [-o output_file_name] [-v]
+
+	-v enables verbose mode
+
+	Defaults:
+		psp_cfg_file:     "psp_decrypt.cfg"
+		input_file_name:  "psp_encrypt.pcap"
+		output_file_name: "psp_decrypt.pcap"
+
+	The format of the PSP encryption configuration file is:
+
+	series of 32 hex bytes (e.g., 34 44 8a ...):  Master Key 0
+	series of 32 hex bytes (e.g., 56 39 52 ...):  Master Key 1
+
+	The program uses OpenSSL crypto libraries.
+
+/pcap
+=====
+Contains the following files with cleartext packets created by the
+create_pcap program:
+
+	v4_cleartext.pcap
+	v6_cleartext.pcap
+	v4_cleartext_empty.pcap
+	v6_cleartext_empty.pcap
+
+The cleartext packets are used as input for the test cases.  The
+files with the '_empty' suffix contain packets with an L4 payload
+size of 0 bytes.
+
+There is also '.txt' version of each cleartext pcap file.  These files
+have names of the form 'v4_cleartext_pcap.txt'.  The '.txt' files are
+created using 'tcpdump' as follows:
+
+tcpdump -qns 0 -xx -r v4_cleartext.pcap > v4_cleartext_pcap.txt
+
+The purpose of the '.txt' files is to enable a 'diff' of the files
+input to the test cases and the files output by the test cases.  In
+general, the test cases operate as follows:
+
+	- a cleartext packet is encrypted by psp_encrypt
+	- the output from psp_encrypt is used as input to
+	  psp_decrypt
+	- the output from psp_decrypt is compared against the
+	  original cleartext packet
+
+Other pcap files will be created in the /pcap subdirectory when the
+test cases execute.
+
+/cfg
+====
+Contains configuration files used as input to psp_encrypt and psp_decrypt.
+There are multiple configuration files with different values for the various
+test cases.
+
+/test
+=====
+Contains a suite of test cases, which are described below.
+
+	all_tests
+		execute all the test cases
+
+	v4_transport_crypt_off_128
+		IPv4 input packet, transport mode encapsulation,
+		encryption starts after L4 ports, AES-GCM-128,
+
+	v4_transport_no_crypt_off_128
+		same as v4_transport_crypt_off_128 except encryption starts
+		afer PSP header
+
+	v4_transport_crypt_off_128_vc
+		same as v4_transport_crypt_off_128 except PSP header includes
+		a Virtualization Cookie (VC) field
+
+	v4_transport_no_crypt_off_128_vc
+		same as v4_transport_no_crypt_off_128 except PSP header includes
+		a VC field, in this test case the VC field is encrypted
+
+	v4_transport_crypt_off_128_empty
+		similar to v4_transport_crypt_off_128 except size of L4 payload
+		is 0 bytes and crypt off is configured such that no encryption
+		is performed only authentication
+
+	v4_transport_crypt_off_256
+		same as v4_transport_crypt_off_128 except uses AES-GCM-256
+
+	v4_transport_no_crypt_off_256
+		same as v4_transport_no_crypt_off_128 except uses AES-GCM-256
+
+	v4_transport_crypt_off_128_err
+		a single bit error is forced in the packet after encryption and
+		ICV computation, the expected result is an authentication failure
+
+	v4_tunnel_crypt_off_128
+	v4_tunnel_no_crypt_off_128
+	v4_tunnel_crypt_off_256
+	v4_tunnel_no_crypt_off_256
+		same as transport mode tests with similar names except that
+		tunnel mode encapsulation is used
+
+	v6_transport_crypt_off_128
+	v6_transport_no_crypt_off_128
+	v6_transport_crypt_off_256
+	v6_transport_no_crypt_off_256
+	v6_tunnel_crypt_off_128
+	v6_tunnel_no_crypt_off_128
+	v6_tunnel_crypt_off_256
+	v6_tunnel_no_crypt_off_256
+	v6_tunnel_crypt_off_256_vc
+	v6_tunnel_no_crypt_off_256_vc
+	v6_tunnel_crypt_off_256_empty
+	v6_tunnel_crypt_off_256_err
+		same as IPv4 tests with similar names except that IPv6 input
+		packet is used
