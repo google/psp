@@ -710,24 +710,13 @@ static pkt_rc_t tunnel_encap(struct pkt_context *pkt_ctx) {
     crypt_off = pkt_ctx->psp_cfg.ipv4_tunnel_crypt_off * PSP_CRYPT_OFFSET_UNITS;
   } else {
     ipv6 = (struct ipv6_hdr *)(((uint8_t *)eth) + eth_hdr_len);
-    switch (ipv6->proto) {
-      case IP_PROTO_UDP:
-      case IP_PROTO_TCP:
-        ip_proto = &ipv6->proto;
-        ip_hdr_len = sizeof(struct ipv6_hdr);
-        ip_len = ntohs(ipv6->plen);
-        psp_encap_octets = PSP_V6_TUNNEL_ENCAP_OCTETS + vc_octets;
-        psp_next_hdr = IP_PROTO_IPV6;
-        crypt_off =
+    ip_proto = &ipv6->proto;
+    ip_hdr_len = sizeof(struct ipv6_hdr);
+    ip_len = ntohs(ipv6->plen);
+    psp_encap_octets = PSP_V6_TUNNEL_ENCAP_OCTETS + vc_octets;
+    psp_next_hdr = IP_PROTO_IPV6;
+    crypt_off =
             pkt_ctx->psp_cfg.ipv6_tunnel_crypt_off * PSP_CRYPT_OFFSET_UNITS;
-        break;
-      default:
-        fprintf(stderr,
-                "skipping IPv6 packet, next proto not "
-                "TCP or UDP, next proto = 0x%x\n",
-                ipv6->proto);
-        return PKT_SKIPPED;
-    }
   }
 
   max_len = pkt_ctx->max_pkt_octets - psp_encap_octets;
