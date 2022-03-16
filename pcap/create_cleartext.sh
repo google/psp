@@ -15,13 +15,13 @@
 # limitations under the License.
 
 ../src/create_pcap -f ../pcap/v4_cleartext.pcap
-tcpdump -qns 0 -xx -r ./v4_cleartext.pcap > ./v4_cleartext_pcap.txt
+tcpdump -qnts 0 -xx -r ./v4_cleartext.pcap > ./v4_cleartext_pcap.txt
 
 ../src/create_pcap -f ../pcap/v4_cleartext_empty.pcap -e
-tcpdump -qns 0 -xx -r ./v4_cleartext_empty.pcap > ./v4_cleartext_empty_pcap.txt
+tcpdump -qnts 0 -xx -r ./v4_cleartext_empty.pcap > ./v4_cleartext_empty_pcap.txt
 
 ../src/create_pcap -f ../pcap/v6_cleartext.pcap -i 6
-tcpdump -qns 0 -xx -r ./v6_cleartext.pcap > ./v6_cleartext_pcap.txt
+tcpdump -qnts 0 -xx -r ./v6_cleartext.pcap > ./v6_cleartext_pcap.txt
 
 ../src/create_pcap -f ../pcap/v6_cleartext_empty.pcap -i 6 -e
-tcpdump -qns 0 -xx -r ./v6_cleartext_empty.pcap > ./v6_cleartext_empty_pcap.txt
+tcpdump -qnts 0 -xx -r ./v6_cleartext_empty.pcap > ./v6_cleartext_empty_pcap.txt

@@ -238,7 +238,7 @@ static void init_ipv4_pkt_hdrs(struct ipv4_pkt *p) {
 
   return;
 }
-#pragma GCC diagnostic push
+#pragma GCC diagnostic pop
 
 static void init_ipv6_pkt_hdrs(struct ipv6_pkt *p) {
   uint16_t ip_len;

@@ -41,7 +41,7 @@ then
 	exit 1
 fi
 
-tcpdump -qns 0 -xx -r $DECRYPT_PCAP > $DECRYPT_PCAP_TXT
+tcpdump -qnts 0 -xx -r $DECRYPT_PCAP > $DECRYPT_PCAP_TXT
 if [ $? -ne 0 ]
 then
 	echo "FAILED: $0"
