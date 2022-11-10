@@ -12,6 +12,7 @@
 #include <linux/idr.h>
 #include <linux/filter.h>
 #include <linux/rcupdate.h>
+#include <net/psp.h>
 
 #define INIT_SOCKS 128
 
@@ -99,6 +100,7 @@ static struct sock_reuseport *__reuseport_alloc(unsigned int max_socks)
 	reuse->max_socks = max_socks;
 
 	RCU_INIT_POINTER(reuse->prog, NULL);
+	psp_reuseport_init(&reuse->psp);
 	return reuse;
 }
 
@@ -193,6 +195,7 @@ static struct sock_reuseport *reuseport_grow(struct sock_reuseport *reuse)
 	more_reuse->reuseport_id = reuse->reuseport_id;
 	more_reuse->bind_inany = reuse->bind_inany;
 	more_reuse->has_conns = reuse->has_conns;
+	more_reuse->psp = reuse->psp;
 
 	memcpy(more_reuse->socks, reuse->socks,
 	       reuse->num_socks * sizeof(struct sock *));
@@ -221,6 +224,7 @@ static void reuseport_free_rcu(struct rcu_head *head)
 	reuse = container_of(head, struct sock_reuseport, rcu);
 	sk_reuseport_prog_free(rcu_dereference_protected(reuse->prog, 1));
 	ida_free(&reuseport_ida, reuse->reuseport_id);
+	psp_reuseport_free(reuse);
 	kfree(reuse);
 }
 
@@ -489,8 +493,14 @@ struct sock *reuseport_select_sock(struct sock *sk,
 		/* paired with smp_wmb() in __reuseport_add_sock() */
 		smp_rmb();
 
+		if (skb && SKB_PSP_SPI(skb))
+			sk2 = psp_lookup_reuseport(reuse, skb);
+
 		if (!prog || !skb)
 			goto select_by_hash;
+
+		if (skb && SKB_PSP_SPI(skb))
+			sk2 = psp_lookup_reuseport(reuse, skb);
 
 		if (prog->type == BPF_PROG_TYPE_SK_REUSEPORT)
 			sk2 = bpf_run_sk_reuseport(reuse, sk, prog, skb, NULL, hash);

@@ -138,6 +138,25 @@ static int tcp_diag_get_aux(struct sock *sk, bool net_admin,
 		if (err)
 			return err;
 	}
+
+#ifdef CONFIG_INET_PSP
+	if (tcp_sk(sk)->psp.tx_info.spi) {
+		const struct tcp_sock *tp = tcp_sk(sk);
+		struct inet_diag_pspinfo pspinfo = {
+			.tx_spi      = ntohl(tp->psp.tx_info.spi),
+			.curr_rx_spi = ntohl(tp->psp.rx_curr.spi),
+			.curr_rx_gen = tp->psp.rx_curr.gen,
+			.prev_rx_spi = ntohl(tp->psp.rx_prev.spi),
+			.prev_rx_gen = tp->psp.rx_prev.gen,
+		};
+		int err;
+
+		err = nla_put(skb, INET_DIAG_PSP, sizeof(pspinfo), &pspinfo);
+		if (err < 0)
+			return err;
+	}
+#endif
+
 	return 0;
 }
 
@@ -175,6 +194,12 @@ static size_t tcp_diag_get_aux_size(struct sock *sk, bool net_admin)
 				size += ulp_ops->get_info_size(sk);
 		}
 	}
+
+#ifdef CONFIG_INET_PSP
+	if (sk_fullsock_notlistener(sk) && tcp_sk(sk)->psp.tx_info.spi)
+		size += nla_total_size(sizeof(struct inet_diag_pspinfo));
+#endif
+
 	return size;
 }
 

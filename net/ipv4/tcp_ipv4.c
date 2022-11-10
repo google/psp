@@ -69,6 +69,7 @@
 #include <net/xfrm.h>
 #include <net/secure_seq.h>
 #include <net/busy_poll.h>
+#include <net/psp.h>
 
 #include <linux/inet.h>
 #include <linux/ipv6.h>
@@ -213,6 +214,9 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 
 	if (usin->sin_family != AF_INET)
 		return -EAFNOSUPPORT;
+
+	if (psp_missing_cred(tp))
+		return -ENOKEY;
 
 	nexthop = daddr = usin->sin_addr.s_addr;
 	inet_opt = rcu_dereference_protected(inet->inet_opt,
@@ -665,6 +669,8 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 {
 	const struct tcphdr *th = tcp_hdr(skb);
 	struct {
+		struct udphdr uh;
+		struct psphdr ph;
 		struct tcphdr th;
 		__be32 opt[OPTION_BYTES / sizeof(__be32)];
 	} rep;
@@ -706,7 +712,7 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 	}
 
 	memset(&arg, 0, sizeof(arg));
-	arg.iov[0].iov_base = (unsigned char *)&rep;
+	arg.iov[0].iov_base = (unsigned char *)&rep.th;
 	arg.iov[0].iov_len  = sizeof(rep.th);
 
 	net = sk ? sock_net(sk) : dev_net(skb_dst(skb)->dev);
@@ -797,6 +803,7 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 	 */
 	if (sk) {
 		arg.bound_dev_if = sk->sk_bound_dev_if;
+		psp_fill_reply_arg(&arg, psp_sk_key_spi(sk));
 		if (sk_fullsock(sk))
 			trace_tcp_send_reset(sk, skb);
 	}
@@ -840,10 +847,13 @@ static void tcp_v4_send_ack(const struct sock *sk,
 			    struct sk_buff *skb, u32 seq, u32 ack,
 			    u32 win, u32 tsval, u32 tsecr, int oif,
 			    struct tcp_md5sig_key *key,
+			    const struct psp_key_spi *psp_info,
 			    int reply_flags, u8 tos)
 {
 	const struct tcphdr *th = tcp_hdr(skb);
 	struct {
+		struct udphdr uh;
+		struct psphdr ph;
 		struct tcphdr th;
 		__be32 opt[(TCPOLEN_TSTAMP_ALIGNED >> 2)
 #ifdef CONFIG_TCP_MD5SIG
@@ -859,7 +869,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 	memset(&rep.th, 0, sizeof(struct tcphdr));
 	memset(&arg, 0, sizeof(arg));
 
-	arg.iov[0].iov_base = (unsigned char *)&rep;
+	arg.iov[0].iov_base = (unsigned char *)&rep.th;
 	arg.iov[0].iov_len  = sizeof(rep.th);
 	if (tsecr) {
 		rep.opt[0] = htonl((TCPOPT_NOP << 24) | (TCPOPT_NOP << 16) |
@@ -904,6 +914,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 		arg.bound_dev_if = oif;
 	arg.tos = tos;
 	arg.uid = sock_net_uid(net, sk_fullsock(sk) ? sk : NULL);
+	psp_fill_reply_arg(&arg, psp_sk_key_spi(sk));
 	local_bh_disable();
 	ctl_sk = this_cpu_read(*net->ipv4.tcp_sk);
 	ctl_sk->sk_mark = (sk->sk_state == TCP_TIME_WAIT) ?
@@ -934,6 +945,7 @@ static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 			tcptw->tw_ts_recent,
 			tw->tw_bound_dev_if,
 			tcp_twsk_md5_key(tcptw),
+			&tcptw->tw_psp,
 			tw->tw_transparent ? IP_REPLY_ARG_NOSRCCHECK : 0,
 			tw->tw_tos
 			);
@@ -967,6 +979,7 @@ static void tcp_v4_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
 			req->ts_recent,
 			0,
 			tcp_md5_do_lookup(sk, l3index, addr, AF_INET),
+			psp_reqsk_key_spi(req),
 			inet_rsk(req)->no_srccheck ? IP_REPLY_ARG_NOSRCCHECK : 0,
 			ip_hdr(skb)->tos);
 }
@@ -1008,6 +1021,9 @@ static int tcp_v4_send_synack(const struct sock *sk, struct dst_entry *dst,
 			tos |= INET_ECN_ECT_0;
 
 		rcu_read_lock();
+
+		psp_encapsulate_synack(sock_net(sk), skb, req);
+
 		err = ip_build_and_send_pkt(skb, sk, ireq->ir_loc_addr,
 					    ireq->ir_rmt_addr,
 					    rcu_dereference(ireq->ireq_opt),
@@ -1024,6 +1040,7 @@ static int tcp_v4_send_synack(const struct sock *sk, struct dst_entry *dst,
  */
 static void tcp_v4_reqsk_destructor(struct request_sock *req)
 {
+	psp_reqsk_destructor(req);
 	kfree(rcu_dereference_protected(inet_rsk(req)->ireq_opt, 1));
 }
 
@@ -1851,7 +1868,8 @@ bool tcp_add_backlog(struct sock *sk, struct sk_buff *skb)
 	    tail->decrypted != skb->decrypted ||
 #endif
 	    thtail->doff != th->doff ||
-	    memcmp(thtail + 1, th + 1, hdrlen - sizeof(*th)))
+	    memcmp(thtail + 1, th + 1, hdrlen - sizeof(*th)) ||
+	    (SKB_PSP_SPI(tail) ^ SKB_PSP_SPI(skb)))
 		goto no_coalesce;
 
 	__skb_pull(skb, hdrlen);
@@ -2080,6 +2098,9 @@ process:
 	if (tcp_v4_inbound_md5_hash(sk, skb, dif, sdif))
 		goto discard_and_relse;
 
+	if (psp_policy_failure(sk, skb))
+		goto discard_and_relse;
+
 	nf_reset_ct(skb);
 
 	if (tcp_filter(sk, skb))
@@ -2131,7 +2152,7 @@ csum_error:
 		__TCP_INC_STATS(net, TCP_MIB_CSUMERRORS);
 bad_packet:
 		__TCP_INC_STATS(net, TCP_MIB_INERRS);
-	} else {
+	} else if (!SKB_PSP_SPI(skb)) {
 		tcp_v4_send_reset(NULL, skb);
 	}
 
@@ -2174,6 +2195,8 @@ do_time_wait:
 			refcounted = false;
 			goto process;
 		}
+		if (psp_policy_tw_failure(tcp_twsk(sk), skb))
+			break;
 	}
 		/* to ACK */
 		fallthrough;

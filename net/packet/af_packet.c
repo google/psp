@@ -91,6 +91,7 @@
 #endif
 #include <linux/bpf.h>
 #include <net/compat.h>
+#include <net/psp.h>
 
 #include "internal.h"
 
@@ -2077,6 +2078,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 	int skb_len = skb->len;
 	unsigned int snaplen, res;
 	bool is_drop_n_account = false;
+	struct psp_skb_saved_lens psp_lens;
 
 	if (skb->pkt_type == PACKET_LOOPBACK)
 		goto drop;
@@ -2105,9 +2107,11 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 		}
 	}
 
+	psp_trim_skb(skb, &psp_lens);
 	snaplen = skb->len;
 
 	res = run_filter(skb, sk, snaplen);
+	psp_restore_skb(skb, &psp_lens);
 	if (!res)
 		goto drop_n_restore;
 	if (snaplen > res)
@@ -2201,6 +2205,7 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	bool is_drop_n_account = false;
 	unsigned int slot_id = 0;
 	bool do_vnet = false;
+	struct psp_skb_saved_lens psp_lens;
 
 	/* struct tpacket{2,3}_hdr is aligned to a multiple of TPACKET_ALIGNMENT.
 	 * We may add members to them until current aligned size without forcing
@@ -2227,9 +2232,11 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 		}
 	}
 
+	psp_trim_skb(skb, &psp_lens);
 	snaplen = skb->len;
 
 	res = run_filter(skb, sk, snaplen);
+	psp_restore_skb(skb, &psp_lens);
 	if (!res)
 		goto drop_n_restore;
 

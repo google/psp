@@ -265,6 +265,9 @@ struct ip_reply_arg {
 	int	    bound_dev_if;
 	u8  	    tos;
 	kuid_t	    uid;
+#ifdef CONFIG_INET_PSP
+	const struct psp_key_spi *psp_key_spi;
+#endif
 };
 
 #define IP_REPLY_ARG_NOSRCCHECK 1

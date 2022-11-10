@@ -17,6 +17,7 @@ struct fib_rules_ops;
 struct hlist_head;
 struct fib_table;
 struct sock;
+struct socket;
 struct local_ports {
 	seqlock_t	lock;
 	int		range[2];
@@ -50,6 +51,9 @@ struct netns_ipv4 {
 	struct ctl_table_header	*ipv4_hdr;
 	struct ctl_table_header *route_hdr;
 	struct ctl_table_header *xfrm4_hdr;
+#ifdef CONFIG_INET_PSP
+	struct ctl_table_header *psp_hdr;
+#endif
 #endif
 	struct ipv4_devconf	*devconf_all;
 	struct ipv4_devconf	*devconf_dflt;
@@ -223,5 +227,13 @@ struct netns_ipv4 {
 
 	atomic_t	rt_genid;
 	siphash_key_t	ip_id_key;
+#ifdef CONFIG_INET_PSP
+	int sysctl_psp_udp_port;
+	u8 sysctl_psp_enable_rx;
+	u8 sysctl_psp_enable_conn;
+	u8 sysctl_psp_hide_payload_from_taps;
+	u8 sysctl_psp_conntrack_support;
+	struct socket *psp_udp_sock;
+#endif
 };
 #endif

@@ -16,6 +16,7 @@
 #include <net/secure_seq.h>
 #include <net/ipv6.h>
 #include <net/tcp.h>
+#include <net/psp.h>
 
 #define COOKIEBITS 24	/* Upper bits store count */
 #define COOKIEMASK (((__u32)1 << COOKIEBITS) - 1)
@@ -147,6 +148,13 @@ struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb)
 	if (tcp_synq_no_recent_overflow(sk))
 		goto out;
 
+	/* Technically SYN cookies work with PSP but since PSP connections are
+	 * pre-negotiated we don't respond to PSP SYNs with cookies and do not
+	 * accept PSP cookies here.
+	 */
+	if (SKB_PSP_SPI(skb))
+		goto out;
+
 	mss = __cookie_v6_check(ipv6_hdr(skb), th, cookie);
 	if (mss == 0) {
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_SYNCOOKIESFAILED);
@@ -177,6 +185,7 @@ struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb)
 	ireq = inet_rsk(req);
 	treq = tcp_rsk(req);
 	treq->tfo_listener = false;
+	psp_reqsk_init(treq);
 
 	if (security_inet_conn_request(sk, skb, req))
 		goto out_free;

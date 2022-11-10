@@ -41,6 +41,7 @@
 #if IS_ENABLED(CONFIG_NF_CONNTRACK)
 #include <linux/netfilter/nf_conntrack_common.h>
 #endif
+#include <net/psp_defs.h>
 
 /* The interface for checksum offload between the stack and networking drivers
  * is as follows...
@@ -599,6 +600,8 @@ enum {
 	SKB_GSO_UDP_L4 = 1 << 17,
 
 	SKB_GSO_FRAGLIST = 1 << 18,
+
+	SKB_GSO_PSP = 1 << 19,
 };
 
 #if BITS_PER_LONG > 32
@@ -709,6 +712,7 @@ typedef unsigned char *sk_buff_data_t;
  *	@network_header: Network layer header
  *	@mac_header: Link layer header
  *	@kcov_handle: KCOV remote handle for remote coverage collection
+ *	@psp: PSP encryption information
  *	@tail: Tail pointer
  *	@end: End pointer
  *	@head: Head of buffer
@@ -921,6 +925,7 @@ struct sk_buff {
 #ifdef CONFIG_KCOV
 	u64			kcov_handle;
 #endif
+	struct psp_skb		psp;
 
 	/* private: */
 	__u32			headers_end[0];

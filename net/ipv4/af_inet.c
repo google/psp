@@ -228,6 +228,14 @@ int inet_listen(struct socket *sock, int backlog)
 			tcp_fastopen_init_key_once(sock_net(sk));
 		}
 
+		/* PSP state can be dirtied through socket options, ensure we
+		 * go into LISTEN with known state.
+		 */
+#ifdef CONFIG_INET_PSP
+		psp_unregister_key(sk, &tcp_sk(sk)->psp.tx_info);
+#endif
+		memset(&tcp_sk(sk)->psp, 0, sizeof(tcp_sk(sk)->psp));
+
 		err = inet_csk_listen_start(sk, backlog);
 		if (err)
 			goto out;

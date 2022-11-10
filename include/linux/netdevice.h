@@ -57,6 +57,7 @@ struct dsa_port;
 struct ip_tunnel_parm;
 struct macsec_context;
 struct macsec_ops;
+struct psp_spi_tuple;
 
 struct sfp_bus;
 /* 802.11 specific */
@@ -618,6 +619,9 @@ struct netdev_queue {
 
 extern int sysctl_fb_tunnels_only_for_init_net;
 extern int sysctl_devconf_inherit_init_net;
+#ifdef CONFIG_INET_PSP
+extern int sysctl_ifb_enable_psp;
+#endif
 
 /*
  * sysctl_fb_tunnels_only_for_init_net == 0 : For all netns
@@ -1563,6 +1567,14 @@ struct net_device_ops {
 	struct net_device *	(*ndo_get_peer_dev)(struct net_device *dev);
 	int                     (*ndo_fill_forward_path)(struct net_device_path_ctx *ctx,
                                                          struct net_device_path *path);
+#ifdef CONFIG_INET_PSP
+	int			(*ndo_get_spi_and_key)(struct net_device *dev,
+						       struct psp_spi_tuple *tuple);
+	int			(*ndo_psp_register_key)(struct net_device *dev, __be32 spi,
+							const struct psp_key *key,
+						        struct psp_key_idx *index);
+	int			(*ndo_psp_unregister_key)(struct net_device *dev, u32 index);
+#endif
 };
 
 /**
@@ -5040,12 +5052,15 @@ netdev_features_t netdev_increment_features(netdev_features_t all,
 
 /* Allow TSO being used on stacked device :
  * Performing the GSO segmentation before last device
- * is a performance improvement.
+ * is a performance improvement.  We must include the "all for all"
+ * bits in order to prevent these from being cleared as a side
+ * effect.
  */
 static inline netdev_features_t netdev_add_tso_features(netdev_features_t features,
 							netdev_features_t mask)
 {
-	return netdev_increment_features(features, NETIF_F_ALL_TSO, mask);
+	return netdev_increment_features(features, NETIF_F_ALL_TSO |
+					 NETIF_F_ALL_FOR_ALL, mask);
 }
 
 int __netdev_update_features(struct net_device *dev);

@@ -80,6 +80,7 @@
 #include <linux/jump_label_ratelimit.h>
 #include <net/busy_poll.h>
 #include <net/mptcp.h>
+#include <net/psp.h>
 
 int sysctl_tcp_max_orphans __read_mostly = NR_FILE;
 
@@ -6192,6 +6193,8 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 		tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
 		tcp_initialize_rcv_mss(sk);
 
+		psp_rcv_synack(tp, skb);
+
 		/* Remember, tcp_poll() does not lock socket!
 		 * Change state from SYN-SENT only after copied_seq
 		 * is initialized. */
@@ -6819,9 +6822,13 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	/* TW buckets are converted to open requests without
 	 * limitations, they conserve resources and peer is
 	 * evidently real one.
+	 *
+	 * PSP connections are pre-arranged; to get this far peer must have a
+	 * valid SPI/key pair. This SPI must be preregistered on this listener
+	 * socket and is consumed below in psp_treq_init().
 	 */
 	if ((net->ipv4.sysctl_tcp_syncookies == 2 ||
-	     inet_csk_reqsk_queue_is_full(sk)) && !isn) {
+	     inet_csk_reqsk_queue_is_full(sk)) && !isn && !SKB_PSP_SPI(skb)) {
 		want_cookie = tcp_syn_flood_action(sk, rsk_ops->slab_name);
 		if (!want_cookie)
 			goto drop;
@@ -6837,6 +6844,9 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 		goto drop;
 
 	req->syncookie = want_cookie;
+	if (!psp_treq_init(sk, tcp_rsk(req), skb))
+		goto drop_and_free;
+
 	tcp_rsk(req)->af_specific = af_ops;
 	tcp_rsk(req)->ts_off = 0;
 #if IS_ENABLED(CONFIG_MPTCP)
@@ -6872,6 +6882,7 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	if (!want_cookie && !isn) {
 		/* Kill the following clause, if you dislike this way. */
 		if (!net->ipv4.sysctl_tcp_syncookies &&
+		    !SKB_PSP_SPI(skb) &&
 		    (net->ipv4.sysctl_max_syn_backlog - inet_csk_reqsk_queue_len(sk) <
 		     (net->ipv4.sysctl_max_syn_backlog >> 2)) &&
 		    !tcp_peer_is_proven(req, dst)) {

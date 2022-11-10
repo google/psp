@@ -161,6 +161,9 @@ enum {
 	INET_DIAG_SK_BPF_STORAGES,
 	INET_DIAG_CGROUP_ID,
 	INET_DIAG_SOCKOPT,
+
+	INET_DIAG_PSP = 128, /* PSP attribute tag */
+
 	__INET_DIAG_MAX,
 };
 
@@ -199,6 +202,16 @@ struct inet_diag_sockopt {
 		recverr_rfc4884:1,
 		defer_connect:1,
 		unused:5;
+};
+
+/* INET_DIAG_PSP */
+
+struct inet_diag_pspinfo {
+	__u32	tx_spi;
+	__u32	curr_rx_spi;
+	__u32	curr_rx_gen;
+	__u32	prev_rx_spi;
+	__u32	prev_rx_gen;
 };
 
 /* INET_DIAG_VEGASINFO */

@@ -176,6 +176,18 @@ static int ifb_dev_init(struct net_device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_INET_PSP
+#include <net/psp_defs.h>
+
+/* PSP get_spi_and_key callback should be a no-op for ifb driver.
+ */
+static int ifb_get_spi_and_key(struct net_device *dev,
+			       struct psp_spi_tuple *tuple)
+{
+	return -EOPNOTSUPP;
+}
+#endif
+
 static const struct net_device_ops ifb_netdev_ops = {
 	.ndo_open	= ifb_open,
 	.ndo_stop	= ifb_close,
@@ -183,6 +195,9 @@ static const struct net_device_ops ifb_netdev_ops = {
 	.ndo_start_xmit	= ifb_xmit,
 	.ndo_validate_addr = eth_validate_addr,
 	.ndo_init	= ifb_dev_init,
+#ifdef CONFIG_INET_PSP
+	.ndo_get_spi_and_key = ifb_get_spi_and_key,
+#endif
 };
 
 #define IFB_FEATURES (NETIF_F_HW_CSUM | NETIF_F_SG  | NETIF_F_FRAGLIST	| \
@@ -214,6 +229,10 @@ static void ifb_setup(struct net_device *dev)
 	dev->tx_queue_len = TX_Q_LIMIT;
 
 	dev->features |= IFB_FEATURES;
+#ifdef CONFIG_INET_PSP
+	if (sysctl_ifb_enable_psp)
+		dev->features |= NETIF_F_IP_PSP | NETIF_F_PSP_TSO;
+#endif
 	dev->hw_features |= dev->features;
 	dev->hw_enc_features |= dev->features;
 	dev->vlan_features |= IFB_FEATURES & ~(NETIF_F_HW_VLAN_CTAG_TX |

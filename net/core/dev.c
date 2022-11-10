@@ -3657,6 +3657,9 @@ static struct sk_buff *validate_xmit_skb(struct sk_buff *skb, struct net_device 
 	if (unlikely(!skb))
 		goto out_null;
 
+	if (SKB_PSP_SPI(skb) && !(features & NETIF_F_IP_PSP))
+		goto out_kfree_skb;
+
 	if (netif_needs_gso(skb, features)) {
 		struct sk_buff *segs;
 
@@ -9866,6 +9869,26 @@ static netdev_features_t netdev_fix_features(struct net_device *dev,
 	/* TSO with IPv4 ID mangling requires IPv4 TSO be enabled */
 	if ((features & NETIF_F_TSO_MANGLEID) && !(features & NETIF_F_TSO))
 		features &= ~NETIF_F_TSO_MANGLEID;
+
+#ifdef CONFIG_INET_PSP
+	/* PSP requires that device can issue keys and SPIs */
+	if ((features & NETIF_F_IP_PSP) &&
+	    !dev->netdev_ops->ndo_get_spi_and_key) {
+		netdev_dbg(dev, "Dropping NETIF_F_IP_PSP since no PSP netdev_ops.\n");
+		features &= ~NETIF_F_IP_PSP;
+	}
+#endif
+	/* PSP TSO requires TSO and PSP */
+	if (features & NETIF_F_PSP_TSO) {
+		if (!(features & NETIF_F_IP_PSP)) {
+			netdev_dbg(dev, "Dropping NETIF_F_PSP_TSO since no PSP feature.\n");
+			features &= ~NETIF_F_PSP_TSO;
+		}
+		if (!(features & (NETIF_F_TSO | NETIF_F_TSO6))) {
+			netdev_dbg(dev, "Dropping NETIF_F_PSP_TSO since no TSO features.\n");
+			features &= ~NETIF_F_PSP_TSO;
+		}
+	}
 
 	/* TSO ECN requires that TSO is present as well. */
 	if ((features & NETIF_F_ALL_TSO) == NETIF_F_TSO_ECN)

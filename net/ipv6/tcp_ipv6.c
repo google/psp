@@ -59,6 +59,7 @@
 #include <net/inet_common.h>
 #include <net/secure_seq.h>
 #include <net/busy_poll.h>
+#include <net/psp.h>
 
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
@@ -163,6 +164,9 @@ static int tcp_v6_connect(struct sock *sk, struct sockaddr *uaddr,
 
 	if (usin->sin6_family != AF_INET6)
 		return -EAFNOSUPPORT;
+
+	if (psp_missing_cred(tp))
+		return -ENOKEY;
 
 	memset(&fl6, 0, sizeof(fl6));
 
@@ -551,6 +555,8 @@ static int tcp_v6_send_synack(const struct sock *sk, struct dst_entry *dst,
 		    tcp_bpf_ca_needs_ecn((struct sock *)req))
 			tclass |= INET_ECN_ECT_0;
 
+		psp_encapsulate_synack(sock_net(sk), skb, req);
+
 		rcu_read_lock();
 		opt = ireq->ipv6_opt;
 		if (!opt)
@@ -568,6 +574,7 @@ done:
 
 static void tcp_v6_reqsk_destructor(struct request_sock *req)
 {
+	psp_reqsk_destructor(req);
 	kfree(inet_rsk(req)->ipv6_opt);
 	kfree_skb(inet_rsk(req)->pktopts);
 }
@@ -888,7 +895,8 @@ const struct tcp_request_sock_ops tcp_request_sock_ipv6_ops = {
 static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32 seq,
 				 u32 ack, u32 win, u32 tsval, u32 tsecr,
 				 int oif, struct tcp_md5sig_key *key, int rst,
-				 u8 tclass, __be32 label, u32 priority)
+				 u8 tclass, __be32 label, u32 priority,
+				 const struct psp_key_spi *key_spi)
 {
 	const struct tcphdr *th = tcp_hdr(skb);
 	struct tcphdr *t1;
@@ -917,12 +925,13 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 	}
 #endif
 
-	buff = alloc_skb(MAX_HEADER + sizeof(struct ipv6hdr) + tot_len,
-			 GFP_ATOMIC);
+	buff = alloc_skb(MAX_HEADER + sizeof(struct ipv6hdr) + PSP_ENCAP_HLEN +
+			 tot_len, GFP_ATOMIC);
 	if (!buff)
 		return;
 
-	skb_reserve(buff, MAX_HEADER + sizeof(struct ipv6hdr) + tot_len);
+	skb_reserve(buff, MAX_HEADER + sizeof(struct ipv6hdr) + PSP_ENCAP_HLEN +
+		    tot_len);
 
 	t1 = skb_push(buff, tot_len);
 	skb_reset_transport_header(buff);
@@ -1004,6 +1013,13 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 	dst = ip6_dst_lookup_flow(sock_net(ctl_sk), ctl_sk, &fl6, NULL);
 	if (!IS_ERR(dst)) {
 		skb_dst_set(buff, dst);
+		if (!buff->l4_hash && !buff->sw_hash) {
+			if (sk && sk_fullsock(sk))
+				skb_set_hash_from_sk(buff, (struct sock *)sk);
+			else
+				skb_set_hash(buff, prandom_u32(), PKT_HASH_TYPE_L4);
+		}
+		psp_encap(net, buff, key_spi);
 		ip6_xmit(ctl_sk, buff, &fl6, fl6.flowi6_mark, NULL,
 			 tclass & ~INET_ECN_MASK, priority);
 		TCP_INC_STATS(net, TCP_MIB_OUTSEGS);
@@ -1114,7 +1130,7 @@ static void tcp_v6_send_reset(const struct sock *sk, struct sk_buff *skb)
 	}
 
 	tcp_v6_send_response(sk, skb, seq, ack_seq, 0, 0, 0, oif, key, 1,
-			     ipv6_get_dsfield(ipv6h), label, priority);
+			     ipv6_get_dsfield(ipv6h), label, priority, psp_sk_key_spi(sk));
 
 #ifdef CONFIG_TCP_MD5SIG
 out:
@@ -1125,10 +1141,10 @@ out:
 static void tcp_v6_send_ack(const struct sock *sk, struct sk_buff *skb, u32 seq,
 			    u32 ack, u32 win, u32 tsval, u32 tsecr, int oif,
 			    struct tcp_md5sig_key *key, u8 tclass,
-			    __be32 label, u32 priority)
+			    __be32 label, u32 priority, const struct psp_key_spi *psp_info)
 {
 	tcp_v6_send_response(sk, skb, seq, ack, win, tsval, tsecr, oif, key, 0,
-			     tclass, label, priority);
+			     tclass, label, priority, psp_info);
 }
 
 static void tcp_v6_timewait_ack(struct sock *sk, struct sk_buff *skb)
@@ -1140,7 +1156,8 @@ static void tcp_v6_timewait_ack(struct sock *sk, struct sk_buff *skb)
 			tcptw->tw_rcv_wnd >> tw->tw_rcv_wscale,
 			tcp_time_stamp_raw() + tcptw->tw_ts_offset,
 			tcptw->tw_ts_recent, tw->tw_bound_dev_if, tcp_twsk_md5_key(tcptw),
-			tw->tw_tclass, cpu_to_be32(tw->tw_flowlabel), tw->tw_priority);
+			tw->tw_tclass, cpu_to_be32(tw->tw_flowlabel), tw->tw_priority,
+			&tcptw->tw_psp);
 
 	inet_twsk_put(tw);
 }
@@ -1167,7 +1184,8 @@ static void tcp_v6_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
 			tcp_time_stamp_raw() + tcp_rsk(req)->ts_off,
 			req->ts_recent, sk->sk_bound_dev_if,
 			tcp_v6_md5_do_lookup(sk, &ipv6_hdr(skb)->saddr, l3index),
-			ipv6_get_dsfield(ipv6_hdr(skb)), 0, sk->sk_priority);
+			ipv6_get_dsfield(ipv6_hdr(skb)), 0, sk->sk_priority,
+			psp_reqsk_key_spi(req));
 }
 
 
@@ -1738,6 +1756,9 @@ process:
 	if (tcp_v6_inbound_md5_hash(sk, skb, dif, sdif))
 		goto discard_and_relse;
 
+	if (psp_policy_failure(sk, skb))
+		goto discard_and_relse;
+
 	if (tcp_filter(sk, skb))
 		goto discard_and_relse;
 	th = (const struct tcphdr *)skb->data;
@@ -1785,7 +1806,7 @@ csum_error:
 		__TCP_INC_STATS(net, TCP_MIB_CSUMERRORS);
 bad_packet:
 		__TCP_INC_STATS(net, TCP_MIB_INERRS);
-	} else {
+	} else if (!SKB_PSP_SPI(skb)) {
 		tcp_v6_send_reset(NULL, skb);
 	}
 
@@ -1832,6 +1853,8 @@ do_time_wait:
 			refcounted = false;
 			goto process;
 		}
+		if (psp_policy_tw_failure(tcp_twsk(sk), skb))
+			break;
 	}
 		/* to ACK */
 		fallthrough;

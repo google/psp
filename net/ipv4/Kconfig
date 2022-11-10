@@ -412,6 +412,19 @@ config INET_TUNNEL
 	tristate
 	default n
 
+config INET_PSP
+	bool "IP: PSP Security Protocol"
+	default y
+	select NET_UDP_TUNNEL
+	help
+	  Support for PSP Security Protocol.
+
+	  Adds support for PSP Security Protocol encapsulation of
+	  IP traffic, and for the SPI and key generation interfaces
+	  to NICs which support PSP encryption offload.
+
+	  If unsure, say Y.
+
 config INET_DIAG
 	tristate "INET: socket monitoring interface"
 	default y

@@ -875,6 +875,12 @@ static struct lock_class_key macvlan_netdev_addr_lock_key;
 	 NETIF_F_TSO_ECN | NETIF_F_TSO6 | NETIF_F_GRO | NETIF_F_RXCSUM | \
 	 NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_HW_VLAN_STAG_FILTER)
 
+#ifdef CONFIG_INET_PSP
+#define MACVLAN_PSP_FEATURES (NETIF_F_IP_PSP | NETIF_F_PSP_TSO)
+#else
+#define MACVLAN_PSP_FEATURES 0
+#endif
+
 #define MACVLAN_STATE_MASK \
 	((1<<__LINK_STATE_NOCARRIER) | (1<<__LINK_STATE_DORMANT))
 
@@ -895,6 +901,8 @@ static int macvlan_init(struct net_device *dev)
 				  (lowerdev->state & MACVLAN_STATE_MASK);
 	dev->features 		= lowerdev->features & MACVLAN_FEATURES;
 	dev->features		|= ALWAYS_ON_FEATURES;
+	if (vlan->mode == MACVLAN_MODE_VEPA)
+		dev->features	|= lowerdev->features & MACVLAN_PSP_FEATURES;
 	dev->hw_features	|= NETIF_F_LRO;
 	dev->vlan_features	= lowerdev->vlan_features & MACVLAN_FEATURES;
 	dev->vlan_features	|= ALWAYS_ON_OFFLOADS;
@@ -1032,6 +1040,52 @@ static int macvlan_fdb_del(struct ndmsg *ndm, struct nlattr *tb[],
 	return err;
 }
 
+#ifdef CONFIG_INET_PSP
+#include <net/psp_defs.h>
+
+/* PSP .ndos are called from the socket layer holding just the socket's lock
+ * and the upper device. The operations usually sleep.
+ */
+static int macvlan_get_spi_and_key(struct net_device *dev,
+				   struct psp_spi_tuple *tuple)
+{
+	struct net_device *lower_dev = macvlan_dev_real_dev(dev);
+
+	if (psp_check_device(lower_dev))
+		return -EOPNOTSUPP;
+
+	return lower_dev->netdev_ops->ndo_get_spi_and_key(lower_dev, tuple);
+}
+
+static int macvlan_psp_register_key(struct net_device *dev, __be32 spi,
+				    const struct psp_key *key,
+				    struct psp_key_idx *idx)
+{
+	struct net_device *lower_dev = macvlan_dev_real_dev(dev);
+
+	if (psp_check_device(lower_dev))
+		return -EOPNOTSUPP;
+
+	if (lower_dev->netdev_ops->ndo_psp_register_key)
+		return lower_dev->netdev_ops->ndo_psp_register_key(lower_dev, spi, key, idx);
+	else
+		return -EOPNOTSUPP;
+}
+
+static int macvlan_psp_unregister_key(struct net_device *dev, u32 idx)
+{
+	struct net_device *lower_dev = macvlan_dev_real_dev(dev);
+
+	if (psp_check_device(lower_dev))
+		return -EOPNOTSUPP;
+
+	if (lower_dev->netdev_ops->ndo_psp_unregister_key)
+		return lower_dev->netdev_ops->ndo_psp_unregister_key(lower_dev, idx);
+	else
+		return -EOPNOTSUPP;
+}
+#endif
+
 static void macvlan_ethtool_get_drvinfo(struct net_device *dev,
 					struct ethtool_drvinfo *drvinfo)
 {
@@ -1081,7 +1135,11 @@ static netdev_features_t macvlan_fix_features(struct net_device *dev,
 	lowerdev_features &= (features | ~NETIF_F_LRO);
 	features = netdev_increment_features(lowerdev_features, features, mask);
 	features |= ALWAYS_ON_FEATURES;
-	features &= (ALWAYS_ON_FEATURES | MACVLAN_FEATURES);
+	features &= (ALWAYS_ON_FEATURES | MACVLAN_FEATURES |
+		     MACVLAN_PSP_FEATURES);
+
+	if (vlan->mode != MACVLAN_MODE_VEPA)
+		features &= ~MACVLAN_PSP_FEATURES;
 
 	return features;
 }
@@ -1171,6 +1229,11 @@ static const struct net_device_ops macvlan_netdev_ops = {
 	.ndo_get_iflink		= macvlan_dev_get_iflink,
 	.ndo_features_check	= passthru_features_check,
 	.ndo_change_proto_down  = dev_change_proto_down_generic,
+#ifdef CONFIG_INET_PSP
+	.ndo_get_spi_and_key    = macvlan_get_spi_and_key,
+	.ndo_psp_register_key	= macvlan_psp_register_key,
+	.ndo_psp_unregister_key	= macvlan_psp_unregister_key,
+#endif
 };
 
 void macvlan_common_setup(struct net_device *dev)

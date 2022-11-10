@@ -15,6 +15,7 @@
 #include <net/secure_seq.h>
 #include <net/tcp.h>
 #include <net/route.h>
+#include <net/psp.h>
 
 static siphash_key_t syncookie_secret[2] __read_mostly;
 
@@ -343,6 +344,13 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb)
 	if (tcp_synq_no_recent_overflow(sk))
 		goto out;
 
+	/* Technically SYN cookies work with PSP but since PSP connections are
+	 * pre-negotiated we don't respond to PSP SYNs with cookies and do not
+	 * accept PSP cookies here.
+	 */
+	if (SKB_PSP_SPI(skb))
+		goto out;
+
 	mss = __cookie_v4_check(ip_hdr(skb), th, cookie);
 	if (mss == 0) {
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_SYNCOOKIESFAILED);
@@ -392,6 +400,8 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb)
 
 	if (IS_ENABLED(CONFIG_SMC))
 		ireq->smc_ok = 0;
+
+	psp_reqsk_init(treq);
 
 	ireq->ir_iif = inet_request_bound_dev_if(sk, skb);
 

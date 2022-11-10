@@ -22,6 +22,7 @@
 #include <net/tcp.h>
 #include <net/sock_reuseport.h>
 #include <net/addrconf.h>
+#include <net/psp_defs.h>
 
 #if IS_ENABLED(CONFIG_IPV6)
 /* match_sk*_wildcard == true:  IPV6_ADDR_ANY equals to any IPv6 addresses
@@ -1235,6 +1236,8 @@ skip_child_forget:
 		}
 	}
 	WARN_ON_ONCE(sk->sk_ack_backlog);
+
+	psp_listen_stop(sk);
 }
 EXPORT_SYMBOL_GPL(inet_csk_listen_stop);
 

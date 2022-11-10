@@ -46,6 +46,11 @@ EXPORT_SYMBOL(sysctl_fb_tunnels_only_for_init_net);
 int sysctl_devconf_inherit_init_net __read_mostly;
 EXPORT_SYMBOL(sysctl_devconf_inherit_init_net);
 
+#ifdef CONFIG_INET_PSP
+int sysctl_ifb_enable_psp __read_mostly = 0;
+EXPORT_SYMBOL(sysctl_ifb_enable_psp);
+#endif
+
 #ifdef CONFIG_RPS
 static int rps_sock_flow_sysctl(struct ctl_table *table, int write,
 				void *buffer, size_t *lenp, loff_t *ppos)
@@ -580,6 +585,17 @@ static struct ctl_table net_core_table[] = {
 		.extra1		= SYSCTL_ONE,
 		.extra2		= &int_3600,
 	},
+#ifdef CONFIG_INET_PSP
+	{
+		.procname	= "ifb_enable_psp",
+		.data		= &sysctl_ifb_enable_psp,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+#endif
 	{ }
 };
 

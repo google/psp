@@ -134,6 +134,14 @@ enum {
 #define TCP_REPAIR_OFF		0
 #define TCP_REPAIR_OFF_NO_WP	-1	/* Turn off without window probes */
 
+#define TCP_PSP_TX_SPI_KEY	1730	/* PSP (set) tx spi and key */
+#define TCP_PSP_RX_SPI_KEY	1731	/* PSP (get) rx spi and key */
+#define TCP_PSP_LISTENER	1732	/* PSP (get) secure listener */
+#define TCP_PSP_SYN_SPI		1733	/* PSP (get) remote host's SYN spi */
+#define	TCP_PSP_CHECK		1735	/* Check conn for PSP capability */
+
+#define	TCP_PSP_DEVICE		1742	/* PSP (get) device path */
+
 struct tcp_repair_opt {
 	__u32	opt_code;
 	__u32	opt_val;

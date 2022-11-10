@@ -19,6 +19,7 @@
 #include <net/sock.h>
 #include <net/inet_connection_sock.h>
 #include <net/inet_timewait_sock.h>
+#include <net/psp_defs.h>
 #include <uapi/linux/tcp.h>
 
 static inline struct tcphdr *tcp_hdr(const struct sk_buff *skb)
@@ -135,6 +136,11 @@ struct tcp_request_sock {
 						  * after data-in-SYN.
 						  */
 	u8				syn_tos;
+#ifdef CONFIG_INET_PSP
+	struct {
+		struct psp_listen_node  *listen_node;
+	} psp;
+#endif
 };
 
 static inline struct tcp_request_sock *tcp_rsk(const struct request_sock *req)
@@ -412,6 +418,25 @@ struct tcp_sock {
 	 */
 	struct request_sock __rcu *fastopen_rsk;
 	struct saved_syn *saved_syn;
+
+	union {
+#ifdef CONFIG_INET_PSP
+		/* listening sockets only */
+		struct {
+			struct psp_listen_hash __rcu *plh;
+			struct hlist_head list;       /* all our credentials */
+			unsigned int num_credentials; /* length(list) */
+		};
+
+		/* non-listening sockets */
+		struct {
+			struct psp_key_spi tx_info; /* key/SPI for Tx traffic */
+			struct psp_spi_gen rx_prev; /* previous Rx SPI/gen */
+			struct psp_spi_gen rx_curr; /* current Rx SPI/gen */
+			struct psp_spi_gen rx_syn;  /* Rx SYN SPI/gen */
+		};
+#endif
+	} psp;
 };
 
 enum tsq_enum {
@@ -455,6 +480,7 @@ struct tcp_timewait_sock {
 #ifdef CONFIG_TCP_MD5SIG
 	struct tcp_md5sig_key	  *tw_md5_key;
 #endif
+	struct psp_key_spi	  tw_psp;
 };
 
 static inline struct tcp_timewait_sock *tcp_twsk(const struct sock *sk)

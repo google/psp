@@ -29,6 +29,7 @@
 #include <net/inet_common.h>
 #include <net/xfrm.h>
 #include <net/busy_poll.h>
+#include <net/psp.h>
 
 static bool tcp_in_window(u32 seq, u32 end_seq, u32 s_win, u32 e_win)
 {
@@ -94,6 +95,7 @@ tcp_timewait_state_process(struct inet_timewait_sock *tw, struct sk_buff *skb,
 {
 	struct tcp_options_received tmp_opt;
 	struct tcp_timewait_sock *tcptw = tcp_twsk((struct sock *)tw);
+	bool psp_reject = psp_policy_tw_failure(tcptw, skb);
 	bool paws_reject = false;
 
 	tmp_opt.saw_tstamp = 0;
@@ -111,6 +113,9 @@ tcp_timewait_state_process(struct inet_timewait_sock *tw, struct sk_buff *skb,
 
 	if (tw->tw_substate == TCP_FIN_WAIT2) {
 		/* Just repeat all the checks of tcp_rcv_state_process() */
+
+		if (psp_reject)
+			goto done;
 
 		/* Out of window, send ACK */
 		if (paws_reject ||
@@ -175,6 +180,9 @@ tcp_timewait_state_process(struct inet_timewait_sock *tw, struct sk_buff *skb,
 	     (TCP_SKB_CB(skb)->seq == TCP_SKB_CB(skb)->end_seq || th->rst))) {
 		/* In window segment, it may be only reset or bare ack. */
 
+		if (psp_reject)
+			goto done;
+
 		if (th->rst) {
 			/* This is TIME_WAIT assassination, in two flavors.
 			 * Oh well... nobody has a sufficient solution to this
@@ -226,6 +234,9 @@ kill:
 		return TCP_TW_SYN;
 	}
 
+	if (psp_reject)
+		goto done;
+
 	if (paws_reject)
 		__NET_INC_STATS(twsk_net(tw), LINUX_MIB_PAWSESTABREJECTED);
 
@@ -242,6 +253,7 @@ kill:
 		return tcp_timewait_check_oow_rate_limit(
 			tw, skb, LINUX_MIB_TCPACKSKIPPEDTIMEWAIT);
 	}
+done:
 	inet_twsk_put(tw);
 	return TCP_TW_SUCCESS;
 }
@@ -309,6 +321,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 			}
 		} while (0);
 #endif
+		psp_twsk_init(tcptw, tcp_sk(sk));
 
 		/* Get the TIME_WAIT timeout firing. */
 		if (timeo < rto)
@@ -350,6 +363,9 @@ void tcp_twsk_destructor(struct sock *sk)
 		if (twsk->tw_md5_key)
 			kfree_rcu(twsk->tw_md5_key, rcu);
 	}
+#endif
+#ifdef CONFIG_INET_PSP
+	psp_unregister_key(sk, &tcp_twsk(sk)->tw_psp);
 #endif
 }
 EXPORT_SYMBOL_GPL(tcp_twsk_destructor);
@@ -548,6 +564,8 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 	newtp->fastopen_req = NULL;
 	RCU_INIT_POINTER(newtp->fastopen_rsk, NULL);
 
+	psp_oreq_child_init(newtp, treq);
+
 	tcp_bpf_clone(sk, newsk);
 
 	__TCP_INC_STATS(sock_net(sk), TCP_MIB_PASSIVEOPENS);
@@ -577,6 +595,9 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 	__be32 flg = tcp_flag_word(th) & (TCP_FLAG_RST|TCP_FLAG_SYN|TCP_FLAG_ACK);
 	bool paws_reject = false;
 	bool own_req;
+
+	if (psp_policy_req_failure(req, skb))
+		return NULL;
 
 	tmp_opt.saw_tstamp = 0;
 	if (th->doff > (sizeof(struct tcphdr)>>2)) {

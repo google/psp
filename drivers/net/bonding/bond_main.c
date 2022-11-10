@@ -1393,9 +1393,10 @@ static netdev_features_t bond_fix_features(struct net_device *dev,
 
 #define BOND_VLAN_FEATURES	(NETIF_F_HW_CSUM | NETIF_F_SG | \
 				 NETIF_F_FRAGLIST | NETIF_F_GSO_SOFTWARE | \
-				 NETIF_F_HIGHDMA | NETIF_F_LRO)
+				 NETIF_F_HIGHDMA | NETIF_F_LRO | NETIF_F_IP_PSP)
 
 #define BOND_ENC_FEATURES	(NETIF_F_HW_CSUM | NETIF_F_SG | \
+				 NETIF_F_IP_PSP | \
 				 NETIF_F_RXCSUM | NETIF_F_GSO_SOFTWARE)
 
 #define BOND_MPLS_FEATURES	(NETIF_F_HW_CSUM | NETIF_F_SG | \
@@ -5319,6 +5320,83 @@ static void bond_ethtool_get_drvinfo(struct net_device *bond_dev,
 		 BOND_ABI_VERSION);
 }
 
+#ifdef CONFIG_INET_PSP
+/* PSP works on bonded interfaces only if all of the slave devices
+ * support PSP and share a common encryption state.  When fetching
+ * data based on this state (e.g. key generation, and new SPI/key
+ * tuples) it is sufficient to query any one of the slave devices, and
+ * not necessary (or desirable) to iterate the list of slaves and
+ * query all of them.
+ */
+static struct net_device *bond_get_psp_slave_dev(struct net_device *dev)
+{
+	struct bonding *bond = netdev_priv(dev);
+	struct net_device *slave_dev = NULL;
+	struct slave *slave;
+
+	rcu_read_lock();
+	slave = bond_first_slave_rcu(bond);
+	if (slave && (slave->dev->features & NETIF_F_IP_PSP)) {
+		slave_dev = slave->dev;
+		dev_hold(slave_dev);
+	}
+
+	rcu_read_unlock();
+	return slave_dev;
+}
+
+static int bond_get_spi_and_key(struct net_device *dev,
+				struct psp_spi_tuple *tuple)
+{
+	struct net_device *slave_dev;
+	int status;
+
+	slave_dev = bond_get_psp_slave_dev(dev);
+	if (!slave_dev)
+		return -EOPNOTSUPP;
+
+	status = slave_dev->netdev_ops->ndo_get_spi_and_key(slave_dev, tuple);
+	dev_put(slave_dev);
+	return status;
+}
+
+static int bond_psp_register_key(struct net_device *dev, __be32 spi,
+				 const struct psp_key *key,
+				 struct psp_key_idx *idx)
+{
+	struct net_device *lower_dev = bond_get_psp_slave_dev(dev);
+	int ret;
+
+	if (!lower_dev)
+		return -EOPNOTSUPP;
+
+	if (lower_dev->netdev_ops->ndo_psp_register_key)
+		ret = lower_dev->netdev_ops->ndo_psp_register_key(lower_dev, spi, key, idx);
+	else
+		ret = -EOPNOTSUPP;
+
+	dev_put(lower_dev);
+	return ret;
+}
+
+static int bond_psp_unregister_key(struct net_device *dev, u32 idx)
+{
+	struct net_device *lower_dev = bond_get_psp_slave_dev(dev);
+	int ret;
+
+	if (!lower_dev)
+		return -EOPNOTSUPP;
+
+	if (lower_dev->netdev_ops->ndo_psp_unregister_key)
+		ret = lower_dev->netdev_ops->ndo_psp_unregister_key(lower_dev, idx);
+	else
+		ret = -EOPNOTSUPP;
+
+	dev_put(lower_dev);
+	return ret;
+}
+#endif
+
 static const struct ethtool_ops bond_ethtool_ops = {
 	.get_drvinfo		= bond_ethtool_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
@@ -5357,6 +5435,11 @@ static const struct net_device_ops bond_netdev_ops = {
 	.ndo_bpf		= bond_xdp,
 	.ndo_xdp_xmit           = bond_xdp_xmit,
 	.ndo_xdp_get_xmit_slave = bond_xdp_get_xmit_slave,
+#ifdef CONFIG_INET_PSP
+	.ndo_get_spi_and_key    = bond_get_spi_and_key,
+	.ndo_psp_register_key	= bond_psp_register_key,
+	.ndo_psp_unregister_key	= bond_psp_unregister_key,
+#endif
 };
 
 static const struct device_type bond_type = {

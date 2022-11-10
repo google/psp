@@ -37,6 +37,7 @@
 
 #define pr_fmt(fmt) "TCP: " fmt
 
+#include <net/psp.h>
 #include <net/tcp.h>
 #include <net/mptcp.h>
 
@@ -1402,6 +1403,8 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 
 	tcp_add_tx_delay(skb, tp);
 
+	psp_encapsulate_tcp(skb, sk);
+
 	err = INDIRECT_CALL_INET(icsk->icsk_af_ops->queue_xmit,
 				 inet6_csk_xmit, ip_queue_xmit,
 				 sk, skb, &inet->cork.fl);
@@ -1713,6 +1716,9 @@ static inline int __tcp_mtu_to_mss(struct sock *sk, int pmtu)
 			mss_now -= icsk->icsk_af_ops->net_frag_header_len;
 	}
 
+	/* PSP adds UDP+PSP headers and an ICV trailer */
+	mss_now -= psp_encap_overhead(tp);
+
 	/* Clamp it (mss_clamp does not include tcp options) */
 	if (mss_now > tp->rx_opt.mss_clamp)
 		mss_now = tp->rx_opt.mss_clamp;
@@ -1743,6 +1749,7 @@ int tcp_mss_to_mtu(struct sock *sk, int mss)
 
 	mtu = mss +
 	      tp->tcp_header_len +
+	      psp_encap_overhead(tp) +
 	      icsk->icsk_ext_hdr_len +
 	      icsk->icsk_af_ops->net_header_len;
 

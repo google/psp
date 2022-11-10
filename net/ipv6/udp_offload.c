@@ -12,6 +12,7 @@
 #include <net/ipv6.h>
 #include <net/udp.h>
 #include <net/ip6_checksum.h>
+#include <net/psp_defs.h>
 #include "ip6_offload.h"
 
 static struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb,

@@ -568,6 +568,14 @@ static int ipvlan_xmit_mode_l3(struct sk_buff *skb, struct net_device *dev)
 	struct ipvl_addr *addr;
 	int addr_type;
 
+	/* Don't try to loop back PSP - let NIC encrypt it.
+	 * No need to check ipvlan_is_private as PSP key exchange would have
+	 * to take the non-PSP path below which would be blocked on private
+	 * ipvlans.
+	 */
+	if (SKB_PSP_SPI(skb))
+		goto out;
+
 	lyr3h = ipvlan_get_L3_hdr(ipvlan->port, skb, &addr_type);
 	if (!lyr3h)
 		goto out;
@@ -594,6 +602,14 @@ static int ipvlan_xmit_mode_l2(struct sk_buff *skb, struct net_device *dev)
 	struct ipvl_addr *addr;
 	void *lyr3h;
 	int addr_type;
+
+	/* Don't try to loop back PSP - let NIC encrypt it.
+	 * No need to check ipvlan_is_private as PSP key exchange would have
+	 * to take the non-PSP path below which would be blocked on private
+	 * ipvlans.
+	 */
+	if (SKB_PSP_SPI(skb))
+		goto out;
 
 	if (!ipvlan_is_vepa(ipvlan->port) &&
 	    ether_addr_equal(eth->h_dest, eth->h_source)) {
@@ -625,6 +641,7 @@ static int ipvlan_xmit_mode_l2(struct sk_buff *skb, struct net_device *dev)
 		return NET_XMIT_SUCCESS;
 	}
 
+out:
 	skb->dev = ipvlan->phy_dev;
 	return dev_queue_xmit(skb);
 }

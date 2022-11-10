@@ -367,6 +367,7 @@ static int ipv4_get_l4proto(const struct sk_buff *skb, unsigned int nhoff,
 }
 
 #if IS_ENABLED(CONFIG_IPV6)
+#include <net/psp_defs.h>
 static int ipv6_get_l4proto(const struct sk_buff *skb, unsigned int nhoff,
 			    u8 *protonum)
 {
@@ -381,6 +382,25 @@ static int ipv6_get_l4proto(const struct sk_buff *skb, unsigned int nhoff,
 		return -1;
 	}
 	protoff = ipv6_skip_exthdr(skb, extoff, &nexthdr, &frag_off);
+#if defined(CONFIG_INET_PSP)
+	/* Note: We use init_net to get the sysctl, not current net,
+	 * to reduce impact of PSP to this file (we would have to add
+	 * the net pointer all over the places)
+	 */
+	if (protoff > 0 && nexthdr == IPPROTO_UDP &&
+	    init_net.ipv4.sysctl_psp_conntrack_support &&
+	    skb->encapsulation && skb->psp.spi) {
+		struct {
+			struct udphdr udp;
+			struct psphdr psp;
+		} _up, *up;
+		up = skb_header_pointer(skb, protoff, sizeof(_up), &_up);
+		if (up && up->udp.dest == htons(PSP_UDP_DPORT)) {
+			nexthdr = up->psp.nh;
+			protoff += sizeof(_up);
+		}
+	}
+#endif
 	/*
 	 * (protoff == skb->len) means the packet has not data, just
 	 * IPv6 and possibly extensions headers, but it is tracked anyway

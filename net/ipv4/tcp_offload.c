@@ -223,7 +223,8 @@ struct sk_buff *tcp_gro_receive(struct list_head *head, struct sk_buff *skb)
 
 		th2 = tcp_hdr(p);
 
-		if (*(u32 *)&th->source ^ *(u32 *)&th2->source) {
+		if ((*(u32 *)&th->source ^ *(u32 *)&th2->source) |
+		    (SKB_PSP_SPI(skb) ^ SKB_PSP_SPI(p))) {
 			NAPI_GRO_CB(p)->same_flow = 0;
 			continue;
 		}

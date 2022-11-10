@@ -115,11 +115,18 @@ static void ipvlan_port_destroy(struct net_device *dev)
 #define IPVLAN_ALWAYS_ON \
 	(IPVLAN_ALWAYS_ON_OFLOADS | NETIF_F_LLTX | NETIF_F_VLAN_CHALLENGED)
 
+#ifdef CONFIG_INET_PSP
+#define IPVLAN_PSP_FEATURES (NETIF_F_IP_PSP | NETIF_F_PSP_TSO)
+#else
+#define IPVLAN_PSP_FEATURES 0
+#endif
+
 #define IPVLAN_FEATURES \
 	(NETIF_F_SG | NETIF_F_HW_CSUM | NETIF_F_HIGHDMA | NETIF_F_FRAGLIST | \
 	 NETIF_F_GSO | NETIF_F_ALL_TSO | NETIF_F_GSO_ROBUST | \
 	 NETIF_F_GRO | NETIF_F_RXCSUM | \
-	 NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_HW_VLAN_STAG_FILTER)
+	 NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_HW_VLAN_STAG_FILTER | \
+	 IPVLAN_PSP_FEATURES)
 
 	/* NETIF_F_GSO_ENCAP_ALL NETIF_F_GSO_SOFTWARE Newly added */
 
@@ -351,6 +358,55 @@ static int ipvlan_get_iflink(const struct net_device *dev)
 	return ipvlan->phy_dev->ifindex;
 }
 
+#ifdef CONFIG_INET_PSP
+#include <net/psp_defs.h>
+
+/* PSP .ndos are called from the socket layer holding just the socket's lock
+ * and the upper device. The operations usually sleep.
+ */
+static int ipvlan_get_spi_and_key(struct net_device *dev,
+				  struct psp_spi_tuple *tuple)
+{
+	struct ipvl_dev *ipvlan = netdev_priv(dev);
+	struct net_device *phy_dev = ipvlan->phy_dev;
+
+	if (psp_check_device(phy_dev))
+		return -EOPNOTSUPP;
+
+	return phy_dev->netdev_ops->ndo_get_spi_and_key(phy_dev, tuple);
+}
+
+static int ipvlan_psp_register_key(struct net_device *dev, __be32 spi,
+				   const struct psp_key *key,
+				   struct psp_key_idx *idx)
+{
+	struct ipvl_dev *ipvlan = netdev_priv(dev);
+	struct net_device *phy_dev = ipvlan->phy_dev;
+
+	if (psp_check_device(phy_dev))
+		return -EOPNOTSUPP;
+
+	if (phy_dev->netdev_ops->ndo_psp_register_key)
+		return phy_dev->netdev_ops->ndo_psp_register_key(phy_dev, spi, key, idx);
+	else
+		return -EOPNOTSUPP;
+}
+
+static int ipvlan_psp_unregister_key(struct net_device *dev, u32 idx)
+{
+	struct ipvl_dev *ipvlan = netdev_priv(dev);
+	struct net_device *phy_dev = ipvlan->phy_dev;
+
+	if (psp_check_device(phy_dev))
+		return -EOPNOTSUPP;
+
+	if (phy_dev->netdev_ops->ndo_psp_unregister_key)
+		return phy_dev->netdev_ops->ndo_psp_unregister_key(phy_dev, idx);
+	else
+		return -EOPNOTSUPP;
+}
+#endif
+
 static const struct net_device_ops ipvlan_netdev_ops = {
 	.ndo_init		= ipvlan_init,
 	.ndo_uninit		= ipvlan_uninit,
@@ -364,6 +420,11 @@ static const struct net_device_ops ipvlan_netdev_ops = {
 	.ndo_vlan_rx_add_vid	= ipvlan_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= ipvlan_vlan_rx_kill_vid,
 	.ndo_get_iflink		= ipvlan_get_iflink,
+#ifdef CONFIG_INET_PSP
+	.ndo_get_spi_and_key    = ipvlan_get_spi_and_key,
+	.ndo_psp_register_key	= ipvlan_psp_register_key,
+	.ndo_psp_unregister_key	= ipvlan_psp_unregister_key,
+#endif
 };
 
 static int ipvlan_hard_header(struct sk_buff *skb, struct net_device *dev,

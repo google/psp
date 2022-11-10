@@ -2863,6 +2863,9 @@ adjudge_to_death:
 		 */
 		if (req)
 			reqsk_fastopen_remove(sk, req, false);
+#ifdef CONFIG_INET_PSP
+		psp_unregister_key(sk, &tcp_sk(sk)->psp.tx_info);
+#endif
 		inet_csk_destroy_sock(sk);
 	}
 	/* Otherwise, socket is reprieved until protocol close. */
@@ -3058,6 +3061,11 @@ int tcp_disconnect(struct sock *sk, int flags)
 		sk->sk_frag.page = NULL;
 		sk->sk_frag.offset = 0;
 	}
+
+#ifdef CONFIG_INET_PSP
+	psp_unregister_key(sk, &tcp_sk(sk)->psp.tx_info);
+#endif
+	memset(&tp->psp, 0, sizeof(tp->psp));
 
 	sk_error_report(sk);
 	return 0;
@@ -3637,6 +3645,17 @@ static int do_tcp_setsockopt(struct sock *sk, int level, int optname,
 			tcp_enable_tx_delay();
 		tp->tcp_tx_delay = val;
 		break;
+
+#ifdef CONFIG_INET_PSP
+	case TCP_PSP_TX_SPI_KEY:
+		err = psp_set_tx_spi_key(sk, optval, optlen);
+		break;
+
+	case TCP_PSP_LISTENER:
+		err = psp_set_listener(sk, optval, optlen);
+		break;
+#endif
+
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -4154,6 +4173,25 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		}
 		return 0;
 	}
+
+#ifdef CONFIG_INET_PSP
+	case TCP_PSP_DEVICE:
+		return psp_get_device_path(sk, optval, optlen);
+
+	case TCP_PSP_RX_SPI_KEY:
+		return psp_get_rx_spi_key(sk, optval, optlen);
+
+	case TCP_PSP_LISTENER:
+		return psp_get_listener(sk, optval, optlen);
+
+	case TCP_PSP_SYN_SPI:
+		return psp_get_syn_spi(sk, optval, optlen);
+
+	case TCP_PSP_CHECK:
+		val = psp_check_peer(sk);
+		break;
+#endif
+
 #ifdef CONFIG_MMU
 	case TCP_ZEROCOPY_RECEIVE: {
 		struct scm_timestamping_internal tss;
@@ -4412,10 +4450,15 @@ void tcp_done(struct sock *sk)
 
 	sk->sk_shutdown = SHUTDOWN_MASK;
 
-	if (!sock_flag(sk, SOCK_DEAD))
+	if (!sock_flag(sk, SOCK_DEAD)) {
 		sk->sk_state_change(sk);
-	else
+	} else {
+#ifdef CONFIG_INET_PSP
+		psp_unregister_key(sk, &tcp_sk(sk)->psp.tx_info);
+#endif
+
 		inet_csk_destroy_sock(sk);
+	}
 }
 EXPORT_SYMBOL_GPL(tcp_done);
 
