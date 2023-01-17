@@ -13,6 +13,9 @@ sudo apt-get install libcap-dev
 ## To Compile
 ```
 make pspping
+make psp_key_benchmark
+or
+make all
 ```
 
 ## Enable PSP and Sanity Check
@@ -23,7 +26,7 @@ make pspping
 sysctl -n net.ipv4.psp_enable_conn
 ```
 
-## Testing
+## Pspping Testing
 ```
 # Basic Params
 DEV=eth0
@@ -83,4 +86,16 @@ sysctl -w net.ipv4.tcp_syncookies=2 # on server and client
 # BPF Program
 ./pspping -v6 --bpf $DEV $PORT
 ./pspping -v6 --bpf $DEV $SERVER $PORT
+```
+
+## Key Stress Testing
+```
+# key generation
+./psp_key_benchmark -i generation
+
+# key insertion
+./psp_key_benchmark -i insertion
+
+# key listener
+./psp_key_benchmark -i listener
 ```
